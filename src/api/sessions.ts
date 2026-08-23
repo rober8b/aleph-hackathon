@@ -6,6 +6,7 @@ import {
   sessionMessageRequestSchema,
   type ConversationMessage,
   type CreateSessionResponse,
+  type RecipientMemoryInspection,
   type SessionInspectResponse,
 } from '../contracts/http.js';
 
@@ -23,6 +24,18 @@ function toConversationMessages(messages: ModelMessage[]): ConversationMessage[]
       m.role === 'user' || m.role === 'assistant',
     )
     .map((m) => ({ role: m.role, content: toText(m.content) }));
+}
+
+function toRecipientMemoryInspection(session: store.DemoSession): RecipientMemoryInspection | undefined {
+  const memory = session.recipientMemory;
+  if (!memory) return undefined;
+  return {
+    selectedRecipient: memory.selectedRecipient,
+    clarification: memory.clarification,
+    // The draft may contain an exact address. Inspection exposes only expiry,
+    // never the staged content or confirmation identifier.
+    pendingWrite: memory.pendingWrite ? { expiresAt: new Date(memory.pendingWrite.expiresAt).toISOString() } : undefined,
+  };
 }
 
 export async function registerSessionRoutes(app: FastifyInstance): Promise<void> {
@@ -46,6 +59,7 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
         id: session.id,
         messages: toConversationMessages(session.messages),
         pendingTransfer: session.pendingTransfer,
+        recipientMemory: toRecipientMemoryInspection(session),
         lastTransactionHash: session.lastTransactionHash,
         createdAt: session.createdAt,
       };
@@ -70,7 +84,19 @@ export async function registerSessionRoutes(app: FastifyInstance): Promise<void>
         return reply.send({ status: 'error', message: parsed.error.message, code: 'invalid_body' });
       }
 
-      const result = await handleMessage(session.id, parsed.data.message);
+      const abortController = new AbortController();
+      const abortOnDisconnect = () => abortController.abort();
+      request.raw.once('aborted', abortOnDisconnect);
+      reply.raw.once('close', abortOnDisconnect);
+      let result: Awaited<ReturnType<typeof handleMessage>>;
+      try {
+        result = await handleMessage(session.id, parsed.data.message, {
+          abortSignal: abortController.signal,
+        });
+      } finally {
+        request.raw.removeListener('aborted', abortOnDisconnect);
+        reply.raw.removeListener('close', abortOnDisconnect);
+      }
       if (result.status === 'error') {
         reply.code(422);
       }

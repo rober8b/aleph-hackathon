@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const healthResponseSchema = z.object({
   status: z.literal('ok'),
+  mode: z.enum(['fixture', 'live']),
   mcp: z.enum(['connected', 'disconnected', 'unknown']),
   wallet: z.enum(['unlocked', 'locked', 'unknown']),
   network: z.string(),
@@ -62,11 +63,11 @@ export const sessionMessageRequestSchema = z.object({
 export type SessionMessageRequest = z.infer<typeof sessionMessageRequestSchema>;
 
 export const transferPreviewSchema = z.object({
-  network: z.string(),
-  token: z.string(),
-  recipient: z.string(),
-  amount: z.string(),
-  estimatedFee: z.string(),
+  network: z.string().trim().min(1),
+  token: z.string().trim().min(1),
+  recipient: z.string().trim().min(1),
+  amount: z.string().trim().min(1),
+  estimatedFee: z.string().trim().min(1),
 });
 export type TransferPreview = z.infer<typeof transferPreviewSchema>;
 
@@ -79,6 +80,18 @@ export type TransactionResult = z.infer<typeof transactionResultSchema>;
 
 export const sessionMessageResponseSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('answer'), message: z.string() }),
+  z.object({
+    status: z.literal('clarification_required'),
+    message: z.string(),
+    candidates: z.array(z.object({
+      id: z.string().uuid(),
+      name: z.string(),
+      description: z.string(),
+      version: z.number().int().positive(),
+      evidence: z.string().optional(),
+      score: z.number().optional(),
+    })),
+  }),
   z.object({
     status: z.literal('confirmation_required'),
     message: z.string(),
@@ -107,13 +120,31 @@ export const pendingTransferSchema = z.object({
   amount: z.string(),
   wallet: z.string(),
   preview: transferPreviewSchema,
+  recipientId: z.string().uuid().optional(),
+  recipientVersion: z.number().int().positive().optional(),
 });
 export type PendingTransfer = z.infer<typeof pendingTransferSchema>;
+
+export const recipientMemoryInspectionSchema = z.object({
+  selectedRecipient: z.object({
+    recipientId: z.string().uuid(),
+    version: z.number().int().positive(),
+  }).optional(),
+  clarification: z.array(z.object({
+    recipientId: z.string().uuid(),
+    version: z.number().int().positive(),
+    name: z.string(),
+    description: z.string(),
+  })).optional(),
+  pendingWrite: z.object({ expiresAt: z.string() }).optional(),
+});
+export type RecipientMemoryInspection = z.infer<typeof recipientMemoryInspectionSchema>;
 
 export const sessionInspectResponseSchema = z.object({
   id: z.string(),
   messages: z.array(conversationMessageSchema),
   pendingTransfer: pendingTransferSchema.optional(),
+  recipientMemory: recipientMemoryInspectionSchema.optional(),
   lastTransactionHash: z.string().optional(),
   createdAt: z.string(),
 });
@@ -125,3 +156,21 @@ export const errorResponseSchema = z.object({
   code: z.string(),
 });
 export type ErrorResponse = z.infer<typeof errorResponseSchema>;
+
+export const agentTranscribeRequestSchema = z.object({
+  audioBase64: z.string().min(1),
+  mimeType: z.string().refine((value) => value.startsWith('audio/'), {
+    message: 'mimeType must be an audio/* type',
+  }),
+});
+export type AgentTranscribeRequest = z.infer<typeof agentTranscribeRequestSchema>;
+
+export const agentTranscribeResponseSchema = z.object({
+  transcript: z.string(),
+});
+export type AgentTranscribeResponse = z.infer<typeof agentTranscribeResponseSchema>;
+
+export const voiceSpeakRequestSchema = z.object({
+  text: z.string().min(1),
+});
+export type VoiceSpeakRequest = z.infer<typeof voiceSpeakRequestSchema>;

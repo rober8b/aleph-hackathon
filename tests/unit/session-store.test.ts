@@ -5,6 +5,8 @@ import {
   appendMessage,
   setPendingTransfer,
   clearPendingTransfer,
+  claimPendingTransfer,
+  markPendingTransferUncertain,
   setLastTransactionHash,
   resetSessionStore,
 } from '../../src/sessions/in-memory-store.js';
@@ -56,9 +58,21 @@ describe('in-memory session store', () => {
     expect(getSession(session.id)?.pendingTransfer).toBeUndefined();
   });
 
+  it('claims a pending transfer only once and preserves an uncertain lock', () => {
+    const session = createSession();
+    setPendingTransfer(session.id, samplePending);
+
+    expect(claimPendingTransfer(session.id)).toEqual({ status: 'claimed', transfer: samplePending });
+    expect(claimPendingTransfer(session.id)).toEqual({ status: 'broadcasting' });
+
+    markPendingTransferUncertain(session.id);
+    expect(claimPendingTransfer(session.id)).toEqual({ status: 'uncertain' });
+  });
+
   it('records the last transaction hash', () => {
     const session = createSession();
     setLastTransactionHash(session.id, '0xabc');
     expect(getSession(session.id)?.lastTransactionHash).toBe('0xabc');
   });
+
 });
